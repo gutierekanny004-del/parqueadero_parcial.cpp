@@ -9,7 +9,6 @@ const int FILAS = 18;
 const int COLS = 18;
 const int MAX_CUPOS = 50;
 
-// Precios de pago
 const int PAGO_CARRO = 5000;
 const int PAGO_MOTO  = 2500;
 const int PAGO_BICI  = 1000;
@@ -18,7 +17,7 @@ const int TIPO_CARRO = 1;
 const int TIPO_MOTO  = 2;
 const int TIPO_BICI  = 3;
 
-struct Puesto {
+struct Espacio {
     int    esta_ocupado;
     int    tipo_vehiculo;
     string placa;
@@ -29,15 +28,16 @@ struct Puesto {
 };
 
 struct Parqueadero {
-    Puesto puestos[MAX_CUPOS];
+    Espacio espacios[MAX_CUPOS];
     int    cupos_totales;
+    int    ocupados;
     int    carros_actuales;
     int    motos_actuales;
     int    bicis_actuales;
+    double ingresos_dia;
 };
 
-// El mapa del lugar
-char mapa[FILAS][COLS] = {
+char mapa_base[FILAS][COLS] = {
     {'W','W','E','W','W','W','W','W','W','W','W','W','W','W','W','S','W','W'},
     {'W','X','V','X','X','X','X','X','X','X','X','X','X','X','X','V','X','W'},
     {'W','C','V','C','C','V','C','C','V','C','C','V','C','C','V','C','C','W'},
@@ -58,57 +58,158 @@ char mapa[FILAS][COLS] = {
     {'W','W','W','W','W','W','W','W','W','W','W','W','W','W','W','W','W','W'},
 };
 
+char mapa[FILAS][COLS];
+
 void limpiarPantalla() { cin.ignore(1000, '\n'); }
 
 string obtenerHora(time_t t) {
     struct tm *info = localtime(&t);
-    char buffer[30];
-    sprintf(buffer, "%02d:%02d:%02d", info->tm_hour, info->tm_min, info->tm_sec);
-    return string(buffer);
+    char buf[30];
+    sprintf(buf, "%02d:%02d:%02d  %02d/%02d/%04d",
+        info->tm_hour, info->tm_min, info->tm_sec,
+        info->tm_mday, info->tm_mon + 1, info->tm_year + 1900);
+    return string(buf);
 }
 
-void inicializarParqueadero(Parqueadero *p) {
+string nombreTipo(int tipo) {
+    if (tipo == TIPO_CARRO) return "Carro";
+    if (tipo == TIPO_MOTO)  return "Moto";
+    return "Bicicleta";
+}
+
+double segundosAdentro(Espacio *e) {
+    return difftime(time(nullptr), e->hora_entrada);
+}
+
+void mostrarBienvenida() {
+    time_t ahora = time(nullptr);
+    struct tm *t = localtime(&ahora);
+    cout << "\n+==========================================+\n";
+    cout << "|       SISTEMA DE PARQUEADERO v2.0        |\n";
+    cout << "+==========================================+\n";
+    cout << "|  Fecha : " << setfill('0')
+         << setw(2) << t->tm_mday << "/" << setw(2) << (t->tm_mon + 1) << "/" << (t->tm_year + 1900)
+         << "                        |\n";
+    cout << "|  Hora  : "
+         << setw(2) << t->tm_hour << ":" << setw(2) << t->tm_min << ":" << setw(2) << t->tm_sec
+         << "                           |\n";
+    cout << "+==========================================+\n\n";
+    cout << setfill(' ');
+}
+
+void inicializarParqueadero(Parqueadero *p, char (*m)[COLS]) {
     p->cupos_totales = 0;
+    p->ocupados       = 0;
     p->carros_actuales = 0;
-    p->motos_actuales = 0;
-    p->bicis_actuales = 0;
+    p->motos_actuales  = 0;
+    p->bicis_actuales  = 0;
+    p->ingresos_dia   = 0.0;
 
-    int contador = 0;
-    for (int i = 0; i < FILAS && contador < MAX_CUPOS; i++) {
-        for (int j = 0; j < COLS && contador < MAX_CUPOS; j++) {
-            char letra = mapa[i][j];
-            if (letra == 'C' || letra == 'M' || letra == 'B') {
-                Puesto *espacio = &p->puestos[contador];
-                espacio->esta_ocupado = 0;
-                
-                if (letra == 'C') {
-                    espacio->tipo_vehiculo = TIPO_CARRO;
-                } else if (letra == 'M') {
-                    espacio->tipo_vehiculo = TIPO_MOTO;
-                } else {
-                    espacio->tipo_vehiculo = TIPO_BICI;
-                }
+    for (int i = 0; i < FILAS; i++)
+        for (int j = 0; j < COLS; j++)
+            m[i][j] = mapa_base[i][j];
 
-                espacio->placa = "";
-                espacio->fila = i;
-                espacio->col = j;
-                contador++;
-                p->cupos_totales++;
+    int idx = 0;
+    for (int i = 0; i < FILAS && idx < MAX_CUPOS; i++) {
+    for (int j = 0; j < COLS && idx < MAX_CUPOS; j++) {
+        char c = m[i][j];
+        
+        if (c == 'C' || c == 'M' || c == 'B') {
+            Espacio *e = &p->espacios[idx];
+            e->esta_ocupado = 0;
+
+            if (c == 'C') {
+                e->tipo_vehiculo = TIPO_CARRO;
+            } else if (c == 'M') {
+                e->tipo_vehiculo = TIPO_MOTO;
+            } else {
+                e->tipo_vehiculo = TIPO_BICI;
             }
+
+            e->placa = "";
+            e->hora_entrada = 0;
+            e->hora_entrada_texto = "";
+            e->fila = i;
+            e->col = j;
+            
+            idx++;
+            p->cupos_totales++;
         }
     }
 }
+}
+
+void mostrarMapa(char (*m)[COLS], Parqueadero *p) {
+    cout << "\n--- MAPA DEL PARQUEADERO ---\n\n";
+    cout << "   ";
+    for (int j = 0; j < COLS; j++) cout << setw(2) << j << " ";
+    cout << "\n";
+
+    for (int i = 0; i < FILAS; i++) {
+        cout << setw(2) << i << " ";
+        for (int j = 0; j < COLS; j++) {
+            char c = m[i][j];
+            if (c == 'O') {
+                string etiqueta = "???";
+                for (int k = 0; k < p->cupos_totales; k++) {
+                    Espacio *e = &p->espacios[k];
+                    if (e->fila == i && e->col == j && e->esta_ocupado == 1) {
+                        etiqueta = e->placa.substr(0, 3);
+                        while ((int)etiqueta.size() < 3) etiqueta += ' ';
+                        break;
+                    }
+                }
+                cout << "[" << etiqueta << "]";
+            } else {
+                cout << " " << c << " ";
+            }
+        }
+        cout << "\n";
+    }
+
+    cout << "\nOcupados: " << p->ocupados
+         << "  Libres: " << (p->cupos_totales - p->ocupados)
+         << "  Total: " << p->cupos_totales << "\n\n";
+}
+
+int elegirTipoVehiculo() {
+    int op;
+    cout << "\nTipo de vehiculo:\n";
+    cout << "  1. Carro  ($" << PAGO_CARRO << "/hora)\n";
+    cout << "  2. Moto   ($" << PAGO_MOTO  << "/hora)\n";
+    cout << "  3. Bici   ($" << PAGO_BICI  << "/hora)\n";
+    cout << "  0. Cancelar\n";
+    cout << "Opcion: ";
+    cin >> op; limpiarPantalla();
+    if (op == 1) return TIPO_CARRO;
+    if (op == 2) return TIPO_MOTO;
+    if (op == 3) return TIPO_BICI;
+    return -1;
+}
+
+int buscarEspacioLibre(Parqueadero *p, int tipo, int *fila, int *col) {
+    for (int k = 0; k < p->cupos_totales; k++) {
+        Espacio *e = &p->espacios[k];
+        if (e->esta_ocupado == 0 && e->tipo_vehiculo == tipo) {
+            *fila = e->fila;
+            *col  = e->col;
+            return k;
+        }
+    }
+    return -1;
+}
 
 double calcularPrecio(int tipo, time_t entrada, time_t salida) {
-    double segundos = difftime(salida, entrada);
-    double horas = segundos / 3600.0;
+    double horas = difftime(salida, entrada) / 3600.0;
     
-    // Si entró hace nada, se cobra al menos un cuarto de hora
-    if (horas < 0.25) {
-        horas = 0.25;
+    // Si el tiempo es menor a 10 minutos, se redondea a 10 minutos
+    if (horas < (10.0 / 60.0)) {
+        horas = 10.0 / 60.0;
     }
 
     double tarifa;
+
+    // Cambio del operador ternario por if simples
     if (tipo == TIPO_CARRO) {
         tarifa = PAGO_CARRO;
     } else if (tipo == TIPO_MOTO) {
@@ -116,107 +217,222 @@ double calcularPrecio(int tipo, time_t entrada, time_t salida) {
     } else {
         tarifa = PAGO_BICI;
     }
-    
+
     return horas * tarifa;
 }
 
-void ingresarVehiculo(Parqueadero *p) {
-    int tipo;
-    cout << "\n¿Qué vehículo ingresa? (1. Carro, 2. Moto, 3. Bici): ";
-    cin >> tipo; limpiarPantalla();
+int ingresarVehiculo(Parqueadero *p, char (*m)[COLS]) {
+    int tipo = elegirTipoVehiculo();
+    if (tipo == -1) return 0;
 
-    int indice = -1;
-    for (int i = 0; i < p->cupos_totales; i++) {
-        if (p->puestos[i].esta_ocupado == 0 && p->puestos[i].tipo_vehiculo == tipo) {
-            indice = i;
-            break;
+    int fila, col;
+    int idx = buscarEspacioLibre(p, tipo, &fila, &col);
+    if (idx == -1) {
+        cout << "\nNo hay espacios disponibles para ese tipo de vehiculo.\n";
+        return 0;
+    }
+
+    string placa;
+    cout << "\nIngrese la placa: ";
+    cin >> placa; limpiarPantalla();
+    
+    //Verificar Placas Duplicadas
+    for (int k = 0; k < p->cupos_totales; k++) {
+        if (p->espacios[k].esta_ocupado == 1 && p->espacios[k].placa == placa) {
+            cout << "\nERROR: El vehiculo con placa '" << placa << "' ya esta adentro.\n";
+            return 0;
         }
     }
 
-    if (indice == -1) {
-        cout << "No hay puestos libres para ese tipo de vehículo.\n";
-        return;
-    }
+    Espacio *e = &p->espacios[idx];
+    e->esta_ocupado          = 1;
+    e->placa            = placa;
+    e->hora_entrada     = time(nullptr);
+    e->hora_entrada_texto = obtenerHora(e->hora_entrada);
+    m[fila][col] = 'O';
 
-    cout << "Escriba la placa: ";
-    string placa;
-    cin >> placa; limpiarPantalla();
-
-    Puesto *lugar = &p->puestos[indice];
-    lugar->esta_ocupado = 1;
-    lugar->placa = placa;
-    lugar->hora_entrada = time(nullptr);
-    lugar->hora_entrada_texto = obtenerHora(lugar->hora_entrada);
-    mapa[lugar->fila][lugar->col] = 'O'; // O de Ocupado
-
-    if (tipo == TIPO_CARRO) p->carros_actuales++;
+    p->ocupados++;
+    if (tipo == TIPO_CARRO)     p->carros_actuales++;
     else if (tipo == TIPO_MOTO) p->motos_actuales++;
-    else p->bicis_actuales++;
+    else                        p->bicis_actuales++;
 
-    cout << "Vehículo registrado correctamente.\n";
+    cout << "\nIngreso registrado.\n";
+    cout << "Vehiculo: " << nombreTipo(tipo) << " - " << placa << "\n";
+    cout << "Espacio : fila " << fila << ", columna " << col << "\n";
+    cout << "Entrada : " << e->hora_entrada_texto << "\n";
+    return 1;
 }
 
-void pagarSalida(Parqueadero *p) {
-    cout << "Ingrese la placa del vehículo que sale: ";
-    string placa_buscar;
-    cin >> placa_buscar; limpiarPantalla();
+void procesarSalida(Espacio *e, Parqueadero *p, char (*m)[COLS]) {
+    time_t salida = time(nullptr);
+    double total  = calcularPrecio(e->tipo_vehiculo, e->hora_entrada, salida);
 
-    for (int i = 0; i < p->cupos_totales; i++) {
-        Puesto *lugar = &p->puestos[i];
-        if (lugar->esta_ocupado == 1 && lugar->placa == placa_buscar) {
-            time_t ahora = time(nullptr);
-            double total = calcularPrecio(lugar->tipo_vehiculo, lugar->hora_entrada, ahora);
+    double seg = difftime(salida, e->hora_entrada);
+    int h = (int)(seg / 3600);
+    int mi = (int)((seg - h * 3600.0) / 60);
+    int s = (int)seg % 60;
 
-            cout << "\n--- RECIBO DE PAGO ---" << endl;
-            cout << "Placa: " << lugar->placa << endl;
-            cout << "Entrada: " << obtenerHora(lugar->hora_entrada) << endl;
-            cout << "Salida: " << obtenerHora(ahora) << endl;
-            cout << "TOTAL A PAGAR: $" << fixed << setprecision(0) << total << " pesos." << endl;
-            cout << "----------------------" << endl;
+    cout << "\n--- RECIBO ---\n";
+    cout << "Tipo   : " << nombreTipo(e->tipo_vehiculo) << "\n";
+    cout << "Placa  : " << e->placa << "\n";
+    cout << "Entrada: " << e->hora_entrada_texto << "\n";
+    cout << "Salida : " << obtenerHora(salida) << "\n";
+    cout << "Tiempo : " << h << "h " << mi << "m " << s << "s\n";
+    cout << "TOTAL  : $" << fixed << setprecision(0) << total << " pesos\n";
+    cout << "--------------\n";
 
-            // Dejar el mapa como estaba antes
-            if (lugar->tipo_vehiculo == TIPO_CARRO) {
-                mapa[lugar->fila][lugar->col] = 'C';
-                p->carros_actuales--;
-            } else if (lugar->tipo_vehiculo == TIPO_MOTO) {
-                mapa[lugar->fila][lugar->col] = 'M';
-                p->motos_actuales--;
-            } else {
-                mapa[lugar->fila][lugar->col] = 'B';
-                p->bicis_actuales--;
-            }
+    //acumular ingresos
+    p->ingresos_dia += total;
+    cout << "Ingresos del dia: $" << fixed << setprecision(0) << p->ingresos_dia << " pesos\n";
 
-            lugar->esta_ocupado = 0;
+    if (e->tipo_vehiculo == TIPO_CARRO)     m[e->fila][e->col] = 'C';
+    else if (e->tipo_vehiculo == TIPO_MOTO) m[e->fila][e->col] = 'M';
+    else                                    m[e->fila][e->col] = 'B';
+
+    p->ocupados--;
+    if (e->tipo_vehiculo == TIPO_CARRO)     p->carros_actuales--;
+    else if (e->tipo_vehiculo == TIPO_MOTO) p->motos_actuales--;
+    else                                    p->bicis_actuales--;
+
+    e->esta_ocupado = 0; e->placa = ""; e->hora_entrada = 0; e->hora_entrada_texto = "";
+}
+
+//Nuevo metodo de salida por lista numerada
+int pagarSalida(Parqueadero *p, char (*m)[COLS]) {
+    if (p->ocupados == 0) {
+        cout << "\nEl parqueadero esta vacio.\n";
+        return 0;
+    }
+
+    int tipo = elegirTipoVehiculo();
+    if (tipo == -1) return 0;
+
+    int lista[MAX_CUPOS];
+    int cantidad = 0;
+    for (int k = 0; k < p->cupos_totales; k++) {
+        if (p->espacios[k].esta_ocupado == 1 && p->espacios[k].tipo_vehiculo == tipo) {
+            lista[cantidad++] = k;
+        }
+    }
+
+    if (cantidad == 0) {
+        cout << "\nNo hay vehiculos de ese tipo adentro.\n";
+        return 0;
+    }
+
+    cout << "\n--- VEHICULOS EN EL PARQUEADERO ---\n";
+    cout << left << setw(5) << "No." << setw(10) << "PLACA"
+         << setw(12) << "ESPACIO" << setw(22) << "ENTRADA" << "COBRO EST.\n";
+    cout << string(55, '-') << "\n";
+
+    for (int i = 0; i < cantidad; i++) {
+        Espacio *e = &p->espacios[lista[i]];
+        double est = calcularPrecio(e->tipo_vehiculo, e->hora_entrada, time(nullptr));
+        cout << left << setw(5) << (i + 1) << setw(10) << e->placa
+             << "[" << setw(2) << e->fila << "," << setw(2) << e->col << "]  "
+             << setw(22) << e->hora_entrada_texto
+             << "$" << fixed << setprecision(0) << est << "\n";
+    }
+    cout << "  0. Cancelar\n";
+
+    int sel;
+    cout << "\nSeleccione el numero: ";
+    cin >> sel; limpiarPantalla();
+
+    if (sel == 0) { cout << "\nCancelado.\n"; return 0; }
+    if (sel < 1 || sel > cantidad) { cout << "\nNumero invalido.\n"; return 0; }
+
+    Espacio *elegido = &p->espacios[lista[sel - 1]];
+
+    //Confirmacion antes de cobrar
+    cout << "\nConfirma la salida de " << elegido->placa << "? (S/N): ";
+    char c; cin >> c; limpiarPantalla();
+    if (c != 'S' && c != 's') { cout << "\nSalida cancelada.\n"; return 0; }
+
+    procesarSalida(elegido, p, m);
+    return 1;
+}
+
+//Busqueda por placa
+void buscarPorPlaca(Parqueadero *p) {
+    if (p->ocupados == 0) { cout << "\nNo hay vehiculos adentro.\n"; return; }
+
+    string placa;
+    cout << "\nIngrese la placa a buscar: ";
+    cin >> placa; limpiarPantalla();
+
+    for (int k = 0; k < p->cupos_totales; k++) {
+        Espacio *e = &p->espacios[k];
+        if (e->esta_ocupado == 1 && e->placa == placa) {
+            double seg = segundosAdentro(e);
+            int h = (int)(seg / 3600);
+            int mi = (int)((seg - h * 3600.0) / 60);
+            double est = calcularPrecio(e->tipo_vehiculo, e->hora_entrada, time(nullptr));
+
+            cout << "\n--- VEHICULO ENCONTRADO ---\n";
+            cout << "Placa     : " << e->placa << "\n";
+            cout << "Tipo      : " << nombreTipo(e->tipo_vehiculo) << "\n";
+            cout << "Espacio   : fila " << e->fila << ", col " << e->col << "\n";
+            cout << "Entrada   : " << e->hora_entrada_texto << "\n";
+            cout << "Tiempo    : " << h << "h " << mi << "m\n";
+            cout << "Cobro est.: $" << fixed << setprecision(0) << est << " pesos\n";
             return;
         }
     }
-    cout << "No se encontró ningún vehículo con esa placa.\n";
+    cout << "\nNo se encontro vehiculo con placa '" << placa << "'.\n";
+}
+
+void mostrarEstadisticas(Parqueadero *p) {
+    cout << "\n--- ESTADISTICAS ---\n";
+    cout << "Total espacios: " << p->cupos_totales << "\n";
+    cout << "Ocupados      : " << p->ocupados << "\n";
+    cout << "Disponibles   : " << (p->cupos_totales - p->ocupados) << "\n";
+    cout << "Carros        : " << p->carros_actuales << "\n";
+    cout << "Motos         : " << p->motos_actuales  << "\n";
+    cout << "Bicis         : " << p->bicis_actuales  << "\n";
+    cout << "Ingresos dia  : $" << fixed << setprecision(0) << p->ingresos_dia << " pesos\n";
+
+    if (p->ocupados > 0) {
+        cout << "\n" << left << setw(12) << "TIPO" << setw(10) << "PLACA"
+             << setw(12) << "ESPACIO" << setw(22) << "HORA ENTRADA" << "TIEMPO\n";
+        for (int k = 0; k < p->cupos_totales; k++) {
+            Espacio *e = &p->espacios[k];
+            if (e->esta_ocupado == 0) continue;
+            double seg = segundosAdentro(e);
+            int h = (int)(seg / 3600);
+            int mi = (int)((seg - h * 3600.0) / 60);
+            cout << left << setw(12) << nombreTipo(e->tipo_vehiculo)
+                 << setw(10) << e->placa
+                 << "[" << setw(2) << e->fila << "," << setw(2) << e->col << "]  "
+                 << setw(22) << e->hora_entrada_texto
+                 << h << "h " << mi << "m\n";
+        }
+    }
+}
+
+void ejecutarMenu(Parqueadero *p, char (*m)[COLS]) {
+    int op = 0;
+    do {
+        cout << "\n--- MENU ---\n";
+        cout << "1. Ver mapa\n2. Registrar ingreso\n3. Registrar salida\n";
+        cout << "4. Estadisticas\n5. Buscar por placa\n0. Salir\n";
+        cout << "Opcion: ";
+        cin >> op; limpiarPantalla();
+
+        if      (op == 1) mostrarMapa(m, p);
+        else if (op == 2) ingresarVehiculo(p, m);
+        else if (op == 3) pagarSalida(p, m);
+        else if (op == 4) mostrarEstadisticas(p);
+        else if (op == 5) buscarPorPlaca(p);
+        else if (op == 0) cout << "\nHasta luego.\n";
+        else              cout << "\nEsta opcion no existe, intente con otra.\n";
+    } while (op != 0);
 }
 
 int main() {
-    Parqueadero miParqueadero;
-    inicializarParqueadero(&miParqueadero);
-
-    int opcion = -1;
-    while (opcion != 0) {
-        cout << "\n--- CONTROL DEL PARQUEADERO ---" << endl;
-        cout << "1. Ver el mapa\n";
-        cout << "2. Registrar entrada\n";
-        cout << "3. Registrar salida y pago\n";
-        cout << "0. Salir del programa\n";
-        cout << "Elija una opción: ";
-        cin >> opcion; limpiarPantalla();
-
-        if (opcion == 1) {
-            for (int i = 0; i < FILAS; i++) {
-                for (int j = 0; j < COLS; j++) cout << mapa[i][j] << " ";
-                cout << "\n";
-            }
-        } 
-        else if (opcion == 2) ingresarVehiculo(&miParqueadero);
-        else if (opcion == 3) pagarSalida(&miParqueadero);
-    }
-
-    cout << "Cerrando el sistema. ¡Buen día!\n";
+    mostrarBienvenida();
+    Parqueadero parqueadero;
+    inicializarParqueadero(&parqueadero, mapa);
+    ejecutarMenu(&parqueadero, mapa);
     return 0;
 }
